@@ -16,7 +16,7 @@ drop table if exists #Responders
 select ra.CampaignID,
 	g.MissionCode,
 	g.DonorID, g.GiftID, g.GiftDate, g.AppealCode, SegmentCode=coalesce(ltrim(g.SegmentCode),''), g.Amount,
-	d.FirstName, d.LastName, d.Salutation, StreetAddr=d.NCOA_StreetAddr, StreetAddr2=d.NCOA_StreetAddr2, City=d.NCOA_City, StateCode=d.NCOA_StateCode, Zip5=coalesce(ltrim(d.NCOA_Zip5),''),
+	d.FirstName, d.LastName, d.Salutation, StreetAddr=d.NCOA_StreetAddr, StreetAddr2=d.StreetAddr, City=d.City, StateCode=d.StateCode, Zip5=coalesce(ltrim(d.zip5),''),
 	ZIP_County=z.CountyMixedCase,
 	New_Donor=cast(0 as int),
 	TouchID
@@ -246,6 +246,7 @@ where  g.MissionCode in ('BSM', 'CTM', 'GCRM', 'PRM', 'HRM')
 
 
 Delete #Responders_MB where RespRank>1
+--select * from #responders_mb
 /*
 drop table if exists #Responders_MB
 select ch.CH_ID, c.CampaignID, t.TouchID, Mail_List_Type=s.List_Type, InHomeDate=cast(t.InHomeDate as date), Resp_Days=datediff(dd,t.InHomeDate,g.GiftDate),
@@ -355,6 +356,7 @@ inner join (select MissionCode, DonorID, minGiftDate=min(GiftDate) from Gifts gr
 -- Insert into aggregate
 --=================================================================
 --SELECT TOP 500* FROM  DBIAggregateData..Responders
+DELETE FROM DBIAggregateData..Responders WHERE CampaignID IN (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
 
 INSERT INTO DBIAggregateData..Responders
 SELECT CampaignID, MissionCode, DONORID, GiftID, GiftDate, AppealCode, SegmentCode, Amount, FirstName, LastName, Salutation, StreetAddr, StreetAddr2, City, StateCode, Zip5, ZIP_County, New_Donor
@@ -387,24 +389,6 @@ from #Responders r
 left join #newdonors nd on r.CampaignID=nd.CampaignID and r.MissionCode=nd.MissionCode and r.AppealCode=nd.AppealCode and r.Zip5=nd.Zip5 and r.SegmentCode=nd.SegmentCode
 group by r.CampaignID, r.MissionCode, r.AppealCode, r.Zip5, r.SegmentCode
 
-UPDATE cr set
-	cr.Donors=0,
-	cr.Gifts=0,
-	cr.Amount=0,
-	cr.NewDonors=0,
-	cr.MaxGift=0
-from CampaignResults cr
-
-UPDATE cr set
-	cr.Donors=r.Donors,
-	cr.Gifts=r.Gifts,
-	cr.Amount=r.Amount,
-	cr.NewDonors=r.NewDonors,
-	cr.MaxGift=r.MaxGift
-from CampaignResults cr
-inner join #Responders_Rollup r on cr.CampaignID=r.CampaignID and cr.MissionCode=r.MissionCode and cr.AppealCode=r.AppealCode and cr.ZIP5=r.Zip5 and cr.Segment_Code=r.SegmentCode
-where cr.AttributionType='Direct'
-
 --=================================================================
 -- add rows to CampaignResults for any gifts matching AppealCode
 -- but in a ZIP or SegmentCode not mailed
@@ -425,7 +409,7 @@ left join Segments s on r.SegmentCode=s.Segment_Code
 left join Zips..Zips z on left(r.ZIP5,5)=z.ZipCode and PrimaryRecord='P'
 where cr.Zip5 IS NULL or cr.Segment_Code IS NULL
 
-select * from #Responders_Rollup
+
 
 insert into CampaignResults
 select r.Zip5, z.State, z.CityMixedCase, z.CountyMixedCase, r.CampaignID, r.MissionCode, t.TouchID, t.Wave, MailDate=cast(t.TouchDate as date), t.TouchDesc, r.AppealCode,
@@ -438,6 +422,26 @@ left join Touch t on r.CampaignID=t.CampaignID and r.AppealCode=t.CRE
 left join Segments s on r.SegmentCode=s.Segment_Code
 left join Zips..Zips z on left(r.ZIP5,5)=z.ZipCode and PrimaryRecord='P'
 where cr.Zip5 IS NULL or cr.Segment_Code IS NULL
+
+
+UPDATE cr set
+	cr.Donors=0,
+	cr.Gifts=0,
+	cr.Amount=0,
+	cr.NewDonors=0,
+	cr.MaxGift=0
+from CampaignResults cr
+
+UPDATE cr set
+	cr.Donors=r.Donors,
+	cr.Gifts=r.Gifts,
+	cr.Amount=r.Amount,
+	cr.NewDonors=r.NewDonors,
+	cr.MaxGift=r.MaxGift
+from CampaignResults cr
+inner join #Responders_Rollup r on cr.CampaignID=r.CampaignID and cr.MissionCode=r.MissionCode and cr.AppealCode=r.AppealCode and cr.ZIP5=r.Zip5 and cr.Segment_Code=r.SegmentCode
+where cr.AttributionType='Direct'
+
 
 /*
 select * from BRM..gifts where gift_id=7372              
