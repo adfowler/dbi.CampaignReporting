@@ -12,6 +12,7 @@ GO
 
 --delete Touch where TouchID like '%A%' or TouchID like '%B%' or TouchID like '%C%'
 
+-- direct appeal code match
 drop table if exists #Responders
 select ra.CampaignID,
 	g.MissionCode,
@@ -28,9 +29,52 @@ inner join Responders_AppealCodes ra on g.MissionCode=ra.MissionCode and g.Appea
 where g.Amount>0
 and ra.CampaignID in (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
 
+
+-- BRM sends the appeal code in the campaigncode field with the segment code appended to it
+insert into #Responders
+select ra.CampaignID,
+	g.MissionCode,
+	g.DonorID, g.GiftID, g.GiftDate, ra.AppealCode, SegmentCode=CASE 
+														WHEN ra.AppealCode IN ('Q2209', 'Q2211', 'Q2309') THEN SUBSTRING(CampaignCode, 6, 99) 
+														WHEN ra.AppealCode IN ('Q23111', 'Q23112')THEN SUBSTRING(CampaignCode, 7, 99) 
+													  END, g.Amount,
+	d.FirstName, d.LastName, d.Salutation, StreetAddr=d.NCOA_StreetAddr, StreetAddr2=d.StreetAddr, City=d.City, StateCode=d.StateCode, Zip5=coalesce(ltrim(d.zip5),''),
+	ZIP_County=z.CountyMixedCase,
+	New_Donor=cast(0 as int),
+	TouchID
+from Gifts g
+left join Donors d on g.MissionCode=d.MissionCode and g.DonorID=d.DonorID
+left join Zips..Zips z on left(d.ZIP5,5)=z.ZipCode and PrimaryRecord='P'
+inner join Responders_AppealCodes ra on g.MissionCode=ra.MissionCode 
+where g.Amount>0
+and g.MissionCode = 'BRM'
+and ra.CampaignID in (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
+and g.CampaignCode like ra.AppealCode + '%'
+
+-- ROH sends the appeal code with an '_' in the middle of it plus some other stuff at the end (segment code?)
+insert into #Responders
+select ra.CampaignID,
+	g.MissionCode,
+	g.DonorID, g.GiftID, g.GiftDate, ra.AppealCode, SegmentCode=CASE WHEN ra.AppealCode IN ('23D101', '23D102', '23D103') THEN SUBSTRING(g.AppealCode, 8, 99)
+																	 WHEN ra.AppealCode = '23D121' THEN REPLACE(left(AppealDesc, charindex(' ', AppealDesc) - 1), '23D121','') end, g.Amount,
+	d.FirstName, d.LastName, d.Salutation, StreetAddr=d.NCOA_StreetAddr, StreetAddr2=d.StreetAddr, City=d.City, StateCode=d.StateCode, Zip5=coalesce(ltrim(d.zip5),''),
+	ZIP_County=z.CountyMixedCase,
+	New_Donor=cast(0 as int),
+	TouchID
+from Gifts g
+left join Donors d on g.MissionCode=d.MissionCode and g.DonorID=d.DonorID
+left join Zips..Zips z on left(d.ZIP5,5)=z.ZipCode and PrimaryRecord='P'
+inner join Responders_AppealCodes ra on g.MissionCode=ra.MissionCode 
+where g.Amount>0
+and g.MissionCode = 'ROH'
+and ra.CampaignID in (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
+and REPLACE(g.AppealCode, '_', '') like ra.AppealCode + '%'
+and g.GiftDate >= '2023-10-01'
+
+
 --SELECT * FROM Responders_AppealCodes
 --SELECT * FROM DBI_2023_FallMailing..Campaign
---SELECT * FROM #Responders
+--SELECT * FROM #Responders where missioncode = 'roh'
 
 
 -- temp code to grab mailed segment codes for BSM that Jon matched since BSM DB does not have segment code in DB
@@ -71,7 +115,7 @@ where  g.MissionCode = 'BRM'
 	--and s.Segment_Code<>'SD'
 	and ch.seed<>1
 
-
+-- null campaign code
 insert into #Responders_MB
 select distinct ch.CH_ID, c.CampaignID, t.TouchID, Mail_List_Type=s.List_Type, InHomeDate=cast(t.InHomeDate as date), Resp_Days=datediff(dd,t.InHomeDate,g.GiftDate),
 	g.MissionCode, g.DonorID, g.GiftID, g.GiftDate, Mail_AppealCode=t.CRE, g.AppealCode, Mail_SegmentCode=s.Segment_Code, g.SegmentCode, g.Amount, New_Donor=cast(0 as int),
@@ -95,6 +139,7 @@ where  g.MissionCode = 'BRM'
 	--and s.Segment_Code<>'SD'
 	--and ch.seed<>1
 	and g.CampaignCode IS NULL
+
 
 -- HHS. Need to go the the HHS database to pull motive_code
 INSERT into #Responders_MB
@@ -410,7 +455,6 @@ left join Zips..Zips z on left(r.ZIP5,5)=z.ZipCode and PrimaryRecord='P'
 where cr.Zip5 IS NULL or cr.Segment_Code IS NULL
 
 
-
 insert into CampaignResults
 select r.Zip5, z.State, z.CityMixedCase, z.CountyMixedCase, r.CampaignID, r.MissionCode, t.TouchID, t.Wave, MailDate=cast(t.TouchDate as date), t.TouchDesc, r.AppealCode,
 	Segment_Code=r.SegmentCode, Segment_Description=coalesce(s.Segment_Description,''), List_Type=coalesce(s.List_Type,''), MailedVolume=0, Cost=0,
@@ -618,3 +662,7 @@ select * from CampaignResults where ZIP5='44321' and CampaignID='ACQ22ROH' and T
 */
 
 
+Select *
+  FROM Responders
+Where CampaignID LIKE '%23'
+And MissionCode = 'BRM'
