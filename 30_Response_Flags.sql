@@ -30,6 +30,7 @@ where g.Amount>0
 and ra.CampaignID in (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
 
 
+
 -- BRM sends the appeal code in the campaigncode field with the segment code appended to it
 insert into #Responders
 select ra.CampaignID,
@@ -51,6 +52,35 @@ and g.MissionCode = 'BRM'
 and ra.CampaignID in (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
 and g.CampaignCode like ra.AppealCode + '%'
 
+-- BSM doesn't send segment code on the gift. this effects mail volume and segment rollups
+--update on donorid
+UPDATE r
+SET r.SegmentCode = ch.SegmentCode
+FROM #Responders r INNER JOIN CampaignHistory ch
+  on r.CampaignID = ch.CampaignID
+  and r.AppealCode = ch.AppealCode
+  and r.DonorID = ch.donor_id
+  and r.TouchID = ch.TouchID
+WHERE r.MissionCode = 'BSM'
+  AND r.SegmentCode = ''
+
+--update on householdhash
+UPDATE r
+SET r.SegmentCode = ch.SegmentCode
+FROM #Responders r 
+inner join Donors d  on r.DonorID = d.DonorID and r.MissionCode = d.MissionCode
+inner join CampaignHistory ch on  
+	  r.CampaignID = ch.CampaignID
+  and r.AppealCode = ch.AppealCode
+  and ch.HouseholdHash = d.NCOA_HouseholdHash
+  and r.TouchID = ch.TouchID
+WHERE r.MissionCode= 'BSM'
+  AND r.SegmentCode = ''
+
+
+
+
+
 -- ROH sends the appeal code with an '_' in the middle of it plus some other stuff at the end (segment code?)
 insert into #Responders
 select ra.CampaignID,
@@ -71,10 +101,9 @@ and ra.CampaignID in (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
 and REPLACE(g.AppealCode, '_', '') like ra.AppealCode + '%'
 and g.GiftDate >= '2023-10-01'
 
-
 --SELECT * FROM Responders_AppealCodes
 --SELECT * FROM DBI_2023_FallMailing..Campaign
---SELECT * FROM #Responders where missioncode = 'roh'
+--SELECT * FROM #Responders where missioncode = 'roh' and city = 'Dellroy'
 
 
 -- temp code to grab mailed segment codes for BSM that Jon matched since BSM DB does not have segment code in DB
@@ -140,6 +169,31 @@ where  g.MissionCode = 'BRM'
 	--and ch.seed<>1
 	and g.CampaignCode IS NULL
 
+-- BRM address matches
+insert into #Responders_MB
+select distinct ch.CH_ID, c.CampaignID, t.TouchID, Mail_List_Type=s.List_Type, InHomeDate=cast(t.InHomeDate as date), Resp_Days=datediff(dd,t.InHomeDate,g.GiftDate),
+	g.MissionCode, g.DonorID, g.GiftID, g.GiftDate, Mail_AppealCode=t.CRE, g.AppealCode, Mail_SegmentCode=s.Segment_Code, g.SegmentCode, g.Amount, New_Donor=cast(0 as int),
+	RespRank=ROW_NUMBER() OVER(PARTITION BY g.MissionCode, g.GiftID ORDER BY datediff(dd,t.InHomeDate,g.GiftDate), t.InHomeDate),
+	CH_ZIP5=ch.ZIP5, d.Zip5, CH_FN=ch.FullName, D_FN=FirstName, D_LN=d.LastName, D_SAL=d.Salutation, d.StreetAddr, d.City, d.StateCode, CH_HH=CH.HouseholdHash,
+	ZIP_County=z.CountyMixedCase
+from CampaignHistory ch
+left join Touch t on ch.CampaignID=t.CampaignID and ch.TouchID=t.TouchID
+left join Campaign c on t.CampaignID=c.CampaignID
+left join Donors d on c.MissionCode=d.MissionCode and ch.HouseholdHash=d.NCOA_HouseholdHash
+left join Gifts g on d.MissionCode=g.MissionCode and d.DonorID=g.DonorID
+left join Segments s on ch.SegmentCode=s.Segment_Code
+left join Zips..Zips z on ch.ZIP5=z.ZipCode and PrimaryRecord='P'
+-- limit to specific Appeal Codes jon provided
+inner join DBI_2023_FallMailing..MatchBackAppealCodes mb on  g.CampaignCode=mb.AppealCode
+where  g.MissionCode = 'BRM'
+	AND GiftDate between '2023-10-01' and '2023-12-31'
+	AND g.Amount < 1000
+	and concat(g.MissionCode, g.DonorID, g.GiftID) not in (select UG=concat(MissionCode, DonorID, GiftID) from #Responders)
+	and concat(g.MissionCode, g.DonorID, g.GiftID) not in (select UG=concat(MissionCode, DonorID, GiftID) from #Responders_MB)
+	and c.CampaignID in (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
+	--and s.Segment_Code<>'SD'
+	and ch.seed<>1
+
 
 -- HHS. Need to go the the HHS database to pull motive_code
 INSERT into #Responders_MB
@@ -152,6 +206,31 @@ from CampaignHistory ch
 left join Touch t on ch.CampaignID=t.CampaignID and ch.TouchID=t.TouchID
 left join Campaign c on t.CampaignID=c.CampaignID
 left join Donors d on c.MissionCode=d.MissionCode and ch.donor_id=d.DonorID
+left join HHS..Gifts g on  d.DonorID=g.Donor_ID
+left join Segments s on ch.SegmentCode=s.Segment_Code
+left join Zips..Zips z on ch.ZIP5=z.ZipCode and PrimaryRecord='P'
+-- limit to specific Appeal Codes jon provided
+inner join DBI_2023_FallMailing..MatchBackAppealCodes mb on  g.motive_code=mb.AppealCode
+where  
+	 gift_date between '2023-10-01' and '2023-12-31'
+	AND g.Amount < 1000
+	--and concat(g.MissionCode, g.DonorID, g.GiftID) not in (select UG=concat(MissionCode, DonorID, GiftID) from #Responders)
+	and c.CampaignID in (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
+	--and s.Segment_Code<>'SD'
+	and ch.seed<>1
+	and mb.MissionCode = 'HHS'
+
+-- HHS. address matches
+INSERT into #Responders_MB
+select distinct ch.CH_ID, c.CampaignID, t.TouchID, Mail_List_Type=s.List_Type, InHomeDate=cast(t.InHomeDate as date), Resp_Days=datediff(dd,t.InHomeDate,g.Gift_Date),
+	'HHS', g.Donor_ID, 0, g.Gift_Date, Mail_AppealCode=t.CRE, g.motive_code, Mail_SegmentCode=s.Segment_Code, '', g.Amount, New_Donor=cast(0 as int),
+	1,--RespRank=ROW_NUMBER() OVER(PARTITION BY g.MissionCode, g.GiftID ORDER BY datediff(dd,t.InHomeDate,g.GiftDate), t.InHomeDate),
+	CH_ZIP5=ch.ZIP5, d.Zip5, CH_FN=ch.FullName, D_FN=FirstName, D_LN=d.LastName, D_SAL=d.Salutation, d.StreetAddr, d.City, d.StateCode, CH_HH=CH.HouseholdHash,
+	ZIP_County=z.CountyMixedCase
+from CampaignHistory ch
+left join Touch t on ch.CampaignID=t.CampaignID and ch.TouchID=t.TouchID
+left join Campaign c on t.CampaignID=c.CampaignID
+left join Donors d on c.MissionCode=d.MissionCode and ch.HouseholdHash=d.NCOA_HouseholdHash
 left join HHS..Gifts g on  d.DonorID=g.Donor_ID
 left join Segments s on ch.SegmentCode=s.Segment_Code
 left join Zips..Zips z on ch.ZIP5=z.ZipCode and PrimaryRecord='P'
@@ -338,12 +417,13 @@ left join Zips..Zips z on ch.ZIP5=z.ZipCode and PrimaryRecord='P'
 -- limit to specific Appeal Codes jon provided
 inner join MatchbackCodes mb on ch.CampaignID=mb.CampaignID and g.AppealCode=mb.Appeal_Code
 where g.Amount>0 and ch.seed<>1 and s.Segment_Code<>'SD'
-	and g.GiftDate between t.InHomeDate and t.InHomeDate+t.ResponseDays
+	--and g.GiftDate between t.InHomeDate and t.InHomeDate+t.ResponseDays
 	-- add in Jon's Matchback Appeal_Code choices for each campaign
 	and g.Amount<1000
 	and concat(g.MissionCode, g.DonorID, g.GiftID) not in (select UG=concat(MissionCode, DonorID, GiftID) from #Responders)
 	and concat(g.MissionCode, g.DonorID, g.GiftID) not in (select UG=concat(MissionCode, DonorID, GiftID) from #Responders_MB)
 	and c.CampaignID in (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
+
 
 --=================================================================
 -- Delete some #Responders requested by Jon or Bill
@@ -408,6 +488,8 @@ SELECT CampaignID, MissionCode, DONORID, GiftID, GiftDate, AppealCode, SegmentCo
 FROM #Responders mb
 WHERE NOT EXISTS (SELECT CampaignID, MissionCode, donorId, GiftId FROM DBIAggregateData..Responders r WHERE r.CampaignID = mb.CampaignID and r.MissionCode = mb.MissionCode and r.DonorID = mb.DonorID and r.Giftid = mb.GiftID)
 
+
+DELETE FROM DBIAggregateData..Responders_MB WHERE CampaignID IN (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
 INSERT INTO DBIAggregateData..Responders_MB
 SELECT *
 FROM #Responders_MB mb
@@ -441,6 +523,7 @@ group by r.CampaignID, r.MissionCode, r.AppealCode, r.Zip5, r.SegmentCode
 
 --select count(*) from #Responders_Rollup
 --select distinct CampaignID, MissionCode, AppealCode, Zip5, SegmentCode from #Responders_Rollup
+--delete from CampaignResults where CampaignID in (select CampaignID from Campaign where CampaignDate >= '2023-05-01')
 
 insert into CampaignResults
 select r.Zip5, z.State, z.CityMixedCase, z.CountyMixedCase, r.CampaignID, r.MissionCode, t.TouchID, t.Wave, MailDate=cast(t.TouchDate as date), t.TouchDesc, r.AppealCode,
@@ -487,6 +570,7 @@ inner join #Responders_Rollup r on cr.CampaignID=r.CampaignID and cr.MissionCode
 where cr.AttributionType='Direct'
 
 
+
 /*
 select * from BRM..gifts where gift_id=7372              
 select * from #Responders where giftdate='2022-12-12' and Zip5=''
@@ -530,7 +614,7 @@ UPDATE cr set
 	cr.Gifts=coalesce(direct.Gifts,0)+coalesce(mb.Gifts,0),
 	cr.Amount=coalesce(direct.Amount,0)+coalesce(mb.Amount,0),
 	cr.NewDonors=coalesce(direct.NewDonors,0)+coalesce(mb.NewDonors,0),
-	cr.MaxGift=case when direct.MaxGift>mb.MaxGift then direct.MaxGift else mb.MaxGift end
+	cr.MaxGift=case when isnull(direct.MaxGift, 0) >= isnull(mb.MaxGift,0) then direct.MaxGift else mb.MaxGift end
 from CampaignResults cr
 left join CampaignResults direct on cr.CampaignID=direct.CampaignID and cr.MissionCode=direct.MissionCode and cr.AppealCode=direct.AppealCode and cr.ZIP5=direct.Zip5 and cr.Segment_Code=direct.Segment_Code
 	and direct.AttributionType='Direct'
@@ -538,6 +622,42 @@ left join CampaignResults mb on cr.CampaignID=mb.CampaignID and cr.MissionCode=m
 	and mb.AttributionType='Matchback'
 where cr.AttributionType='Combined'
 
+--Clean up 
+/*
+UPDATE CampaignResults
+SET List_Type = 'House',
+	Segment_Description = 'Active Donors - Outside Territory'
+WHERE Segment_Code = 'ACA'
+AND CampaignID IN (SELECT CampaignID FROM Campaign WHERE CampaignDate >= '2023-05-01')
+*/
+
+--Mailed volume
+;with volume as (
+		SELECT Campaignid, appealcode, zip5, touchid, segmentcode, count(*) 'volume'
+		FROM CampaignHistory
+		WHERE CAMPAIGNID IN (SELECT CampaignID FROM CAMPAIGN WHERE CampaignDate >= '2023-05-01')
+		GROUP BY Campaignid, appealcode, zip5, touchid,segmentcode
+		
+		)
+UPDATE cr
+SET cr.MailedVolume = v.volume
+FROM CampaignResults cr INNER JOIN volume v
+  on cr.CampaignID = v.CampaignID and
+     cr.AppealCode = v.AppealCode and
+	 cr.ZIP5 = v.ZIP5 and
+	 cr.TouchID = v.TouchID and
+	 cr.Segment_Code = v.SegmentCode
+WHERE cr.CAMPAIGNID IN (SELECT CampaignID FROM CAMPAIGN WHERE CampaignDate >= '2023-05-01')
+
+--Costs
+UPDATE CampaignResults
+set Cost = MailedVolume * touchcost
+FROM CampaignResults cr inner join CampaignCosts cc
+  on cr.CampaignID = cc.CampaignID and
+     cr.TouchID = cc.TouchID and
+	 cr.Wave = cc.Wave and 
+	 cr.List_Type = cc.Version
+WHERE cr.CAMPAIGNID IN (SELECT CampaignID FROM CAMPAIGN WHERE CampaignDate >= '2023-05-01')
 
 
 --=================================================================
