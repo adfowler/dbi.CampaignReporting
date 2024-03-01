@@ -77,8 +77,23 @@ inner join CampaignHistory ch on
 WHERE r.MissionCode= 'BSM'
   AND r.SegmentCode = ''
 
+-- on address & full name
+UPDATE r
+SET r.SegmentCode = ch.SegmentCode
+FROM #Responders r
+inner join bsm..donors d on r.DonorID = d.donor_id
+inner join CampaignHistory ch on d.full_name = ch.FullName and r.MissionCode = LEFT(CH.CampaignID, 3) and r.Zip5 = ch.ZIP5
+WHERE r.MissionCode = 'BSM'
+and r.SegmentCode = ''
 
-
+-- on address -- we might need to standardize the donors table...
+UPDATE r
+SET r.SegmentCode = nc.finalsegmentcd
+FROM #Responders r
+inner join Donors d  on r.DonorID = d.DonorID and r.MissionCode = d.MissionCode
+inner join DBI_2023_FallMailing..NameCruncherResults_v2 nc on REPLACE(d.StreetAddr, '.','') = nc.[Address 1] and d.Zip5 = nc.[Zip 5]
+WHERE r.MissionCode= 'BSM'
+  AND r.SegmentCode = ''
 
 
 -- ROH sends the appeal code with an '_' in the middle of it plus some other stuff at the end (segment code?)
@@ -481,7 +496,7 @@ inner join (select MissionCode, DonorID, minGiftDate=min(GiftDate) from Gifts gr
 -- Insert into aggregate
 --=================================================================
 --SELECT TOP 500* FROM  DBIAggregateData..Responders
-DELETE FROM DBIAggregateData..Responders WHERE CampaignID IN (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
+DELETE FROM DBIAggregateData..Responders WHERE CampaignID IN (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign) AND MissionCode = 'BSM'
 
 INSERT INTO DBIAggregateData..Responders
 SELECT CampaignID, MissionCode, DONORID, GiftID, GiftDate, AppealCode, SegmentCode, Amount, FirstName, LastName, Salutation, StreetAddr, StreetAddr2, City, StateCode, Zip5, ZIP_County, New_Donor
@@ -489,7 +504,7 @@ FROM #Responders mb
 WHERE NOT EXISTS (SELECT CampaignID, MissionCode, donorId, GiftId FROM DBIAggregateData..Responders r WHERE r.CampaignID = mb.CampaignID and r.MissionCode = mb.MissionCode and r.DonorID = mb.DonorID and r.Giftid = mb.GiftID)
 
 
-DELETE FROM DBIAggregateData..Responders_MB WHERE CampaignID IN (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)
+DELETE FROM DBIAggregateData..Responders_MB WHERE CampaignID IN (SELECT CampaignID FROM DBI_2023_FallMailing..Campaign)AND MissionCode = 'BSM'
 INSERT INTO DBIAggregateData..Responders_MB
 SELECT *
 FROM #Responders_MB mb
